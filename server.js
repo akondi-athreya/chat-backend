@@ -1,3 +1,4 @@
+// ✅ Updated server.js
 const express = require('express');
 const http = require('http');
 const WebSocket = require('ws');
@@ -18,7 +19,6 @@ mongoose.connect('mongodb+srv://websocket:websocket@hello.etr3n.mongodb.net/', {
     console.error('MongoDB connection error:', err);
 });
 
-// Get chat history
 app.get('/history/:sender/:receiver', async (req, res) => {
     try {
         const messages = await Message.find({
@@ -34,28 +34,8 @@ app.get('/history/:sender/:receiver', async (req, res) => {
     }
 });
 
-// Save message
-app.post('/messages', async (req, res) => {
-    try {
-        const { sender, receiver, text } = req.body;
-        const message = new Message({
-            sender,
-            receiver,
-            text,
-            timestamp: new Date(),
-            seen: false
-        });
-        await message.save();
-        res.status(201).json(message);
-    } catch (err) {
-        console.error('Error saving message:', err);
-        res.status(500).json({ error: 'Error saving message' });
-    }
-});
-
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
-
 const clients = {};
 
 wss.on('connection', (ws) => {
@@ -74,34 +54,31 @@ wss.on('connection', (ws) => {
             if (parsed.type === 'seen') {
                 const { sender, receiver } = parsed.data;
 
-                // Update messages as seen in database
                 await Message.updateMany(
                     { sender, receiver, seen: false },
                     { $set: { seen: true } }
                 );
 
-                // Notify the sender that messages were seen
-                if (clients[sender] && clients[sender].readyState === WebSocket.OPEN) {
+                if (clients[sender]?.readyState === WebSocket.OPEN) {
                     clients[sender].send(JSON.stringify({
                         type: 'seen',
                         data: { sender, receiver }
                     }));
                 }
-                
-                // Also notify the receiver to update their UI
-                if (clients[receiver] && clients[receiver].readyState === WebSocket.OPEN) {
+
+                if (clients[receiver]?.readyState === WebSocket.OPEN) {
                     clients[receiver].send(JSON.stringify({
                         type: 'seen',
                         data: { sender, receiver }
                     }));
                 }
+
                 return;
             }
 
             if (parsed.type === 'chat') {
                 const { sender, receiver, text, timestamp } = parsed.data;
 
-                // Save message to database
                 const newMessage = new Message({
                     sender,
                     receiver,
@@ -109,30 +86,23 @@ wss.on('connection', (ws) => {
                     timestamp: new Date(timestamp),
                     seen: false
                 });
-                await newMessage.save();
 
-                // Forward to receiver if online
-                if (clients[receiver] && clients[receiver].readyState === WebSocket.OPEN) {
-                    clients[receiver].send(JSON.stringify({
-                        type: 'chat',
-                        data: {
-                            ...parsed.data,
-                            id: newMessage._id.toString(),
-                            timestamp: newMessage.timestamp.toISOString()
-                        },
-                    }));
+                await newMessage.save();
+                const payload = JSON.stringify({
+                    type: 'chat',
+                    data: {
+                        ...parsed.data,
+                        id: newMessage._id.toString(),
+                        timestamp: newMessage.timestamp.toISOString()
+                    },
+                });
+
+                if (clients[receiver]?.readyState === WebSocket.OPEN) {
+                    clients[receiver].send(payload);
                 }
 
-                // Echo back to sender with the database ID
-                if (currentUserId && clients[currentUserId]?.readyState === WebSocket.OPEN) {
-                    clients[currentUserId].send(JSON.stringify({
-                        type: 'chat',
-                        data: {
-                            ...parsed.data,
-                            id: newMessage._id.toString(),
-                            timestamp: newMessage.timestamp.toISOString()
-                        },
-                    }));
+                if (clients[sender]?.readyState === WebSocket.OPEN) {
+                    clients[sender].send(payload);
                 }
             }
         } catch (err) {
