@@ -87,6 +87,14 @@ wss.on('connection', (ws) => {
                         data: { sender, receiver }
                     }));
                 }
+                
+                // Also notify the receiver to update their UI
+                if (clients[receiver] && clients[receiver].readyState === WebSocket.OPEN) {
+                    clients[receiver].send(JSON.stringify({
+                        type: 'seen',
+                        data: { sender, receiver }
+                    }));
+                }
                 return;
             }
 
@@ -109,7 +117,8 @@ wss.on('connection', (ws) => {
                         type: 'chat',
                         data: {
                             ...parsed.data,
-                            id: newMessage._id.toString()
+                            id: newMessage._id.toString(),
+                            timestamp: newMessage.timestamp.toISOString()
                         },
                     }));
                 }
@@ -120,7 +129,8 @@ wss.on('connection', (ws) => {
                         type: 'chat',
                         data: {
                             ...parsed.data,
-                            id: newMessage._id.toString()
+                            id: newMessage._id.toString(),
+                            timestamp: newMessage.timestamp.toISOString()
                         },
                     }));
                 }
