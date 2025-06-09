@@ -3,7 +3,7 @@ const http = require('http');
 const WebSocket = require('ws');
 const cors = require('cors');
 const mongoose = require('mongoose');
-const Message = require('./models/Message');
+const Message = require('./model/messageModel');
 
 const app = express();
 app.use(cors());
