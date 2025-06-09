@@ -1,4 +1,4 @@
-// ✅ Updated server.js
+// ✅ Fixed server.js
 const express = require('express');
 const http = require('http');
 const WebSocket = require('ws');
@@ -19,6 +19,7 @@ mongoose.connect('mongodb+srv://websocket:websocket@hello.etr3n.mongodb.net/', {
     console.error('MongoDB connection error:', err);
 });
 
+// Get chat history between two users
 app.get('/history/:sender/:receiver', async (req, res) => {
     try {
         const messages = await Message.find({
@@ -31,6 +32,89 @@ app.get('/history/:sender/:receiver', async (req, res) => {
     } catch (err) {
         console.error('Error fetching history:', err);
         res.status(500).json({ error: 'Error fetching history' });
+    }
+});
+
+// Get all chats for a user (for chat list)
+app.get('/chats/:userId', async (req, res) => {
+    try {
+        const userId = req.params.userId;
+
+        // Get all messages where user is sender or receiver
+        const messages = await Message.aggregate([
+            {
+                $match: {
+                    $or: [
+                        { sender: userId },
+                        { receiver: userId }
+                    ]
+                }
+            },
+            {
+                $sort: { timestamp: -1 }
+            },
+            {
+                $group: {
+                    _id: {
+                        $cond: [
+                            { $eq: ['$sender', userId] },
+                            '$receiver',
+                            '$sender'
+                        ]
+                    },
+                    lastMessage: { $first: '$text' },
+                    lastTimestamp: { $first: '$timestamp' },
+                    unseenCount: {
+                        $sum: {
+                            $cond: [
+                                {
+                                    $and: [
+                                        { $eq: ['$receiver', userId] },
+                                        { $eq: ['$seen', false] }
+                                    ]
+                                },
+                                1,
+                                0
+                            ]
+                        }
+                    },
+                    lastMessageSeen: { $first: '$seen' },
+                    lastMessageSender: { $first: '$sender' }
+                }
+            },
+            {
+                $project: {
+                    userId: '$_id',
+                    name: '$_id',
+                    lastMessage: 1,
+                    time: '$lastTimestamp',
+                    unseenCount: 1,
+                    seen: {
+                        $cond: [
+                            { $eq: ['$lastMessageSender', userId] },
+                            '$lastMessageSeen',
+                            true
+                        ]
+                    }
+                }
+            }
+        ]);
+
+        const chats = messages.map(chat => ({
+            id: chat.userId,
+            userId: chat.userId,
+            name: chat.name,
+            avatar: 'https://i.pravatar.cc/150?u=' + chat.userId,
+            lastMessage: chat.lastMessage,
+            time: chat.time,
+            unseenCount: chat.unseenCount,
+            seen: chat.seen
+        }));
+
+        res.json(chats);
+    } catch (err) {
+        console.error('Error fetching chats:', err);
+        res.status(500).json({ error: 'Error fetching chats' });
     }
 });
 
@@ -54,22 +138,17 @@ wss.on('connection', (ws) => {
             if (parsed.type === 'seen') {
                 const { sender, receiver } = parsed.data;
 
+                // Mark messages as seen in database
                 await Message.updateMany(
                     { sender, receiver, seen: false },
                     { $set: { seen: true } }
                 );
 
+                // Send seen confirmation to sender
                 if (clients[sender]?.readyState === WebSocket.OPEN) {
                     clients[sender].send(JSON.stringify({
                         type: 'seen',
-                        data: { sender, receiver }
-                    }));
-                }
-
-                if (clients[receiver]?.readyState === WebSocket.OPEN) {
-                    clients[receiver].send(JSON.stringify({
-                        type: 'seen',
-                        data: { sender, receiver }
+                        data: { sender: receiver, receiver: sender }
                     }));
                 }
 
@@ -88,6 +167,7 @@ wss.on('connection', (ws) => {
                 });
 
                 await newMessage.save();
+
                 const payload = JSON.stringify({
                     type: 'chat',
                     data: {
@@ -97,10 +177,12 @@ wss.on('connection', (ws) => {
                     },
                 });
 
+                // Send to receiver
                 if (clients[receiver]?.readyState === WebSocket.OPEN) {
                     clients[receiver].send(payload);
                 }
 
+                // Send back to sender (for confirmation)
                 if (clients[sender]?.readyState === WebSocket.OPEN) {
                     clients[sender].send(payload);
                 }
