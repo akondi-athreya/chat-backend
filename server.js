@@ -3,13 +3,11 @@ const http = require('http');
 const WebSocket = require('ws');
 const cors = require('cors');
 const mongoose = require('mongoose');
-const messageRoutes = require('./router/messageRouter');
-const { saveMessage } = require('./controller/messageController');
+const Message = require('./models/Message');
 
 const app = express();
 app.use(cors());
 app.use(express.json());
-app.use('/', messageRoutes);
 
 mongoose.connect('mongodb+srv://websocket:websocket@hello.etr3n.mongodb.net/', {
     useNewUrlParser: true,
@@ -18,6 +16,41 @@ mongoose.connect('mongodb+srv://websocket:websocket@hello.etr3n.mongodb.net/', {
     console.log('MongoDB connected');
 }).catch(err => {
     console.error('MongoDB connection error:', err);
+});
+
+// Get chat history
+app.get('/history/:sender/:receiver', async (req, res) => {
+    try {
+        const messages = await Message.find({
+            $or: [
+                { sender: req.params.sender, receiver: req.params.receiver },
+                { sender: req.params.receiver, receiver: req.params.sender }
+            ]
+        }).sort({ timestamp: 1 });
+        res.json(messages);
+    } catch (err) {
+        console.error('Error fetching history:', err);
+        res.status(500).json({ error: 'Error fetching history' });
+    }
+});
+
+// Save message
+app.post('/messages', async (req, res) => {
+    try {
+        const { sender, receiver, text } = req.body;
+        const message = new Message({
+            sender,
+            receiver,
+            text,
+            timestamp: new Date(),
+            seen: false
+        });
+        await message.save();
+        res.status(201).json(message);
+    } catch (err) {
+        console.error('Error saving message:', err);
+        res.status(500).json({ error: 'Error saving message' });
+    }
 });
 
 const server = http.createServer(app);
@@ -32,49 +65,63 @@ wss.on('connection', (ws) => {
         try {
             const parsed = JSON.parse(message);
 
-            if (parsed.type === 'seen') {
-                const { sender, receiver } = parsed.data;
-
-                // Update all messages from sender to receiver as seen
-                await Message.updateMany(
-                    { sender, receiver, seen: false },
-                    { $set: { seen: true } }
-                );
-
-                // Notify the original sender (the other user) if they're online
-                if (clients[sender] && clients[sender].readyState === WebSocket.OPEN) {
-                    clients[sender].send(JSON.stringify({
-                        type: 'seen',
-                        data: { sender, receiver }
-                    }));
-                }
-            }
-
             if (parsed.type === 'identification') {
                 currentUserId = parsed.userId;
                 clients[currentUserId] = ws;
                 return;
             }
 
+            if (parsed.type === 'seen') {
+                const { sender, receiver } = parsed.data;
+
+                // Update messages as seen in database
+                await Message.updateMany(
+                    { sender, receiver, seen: false },
+                    { $set: { seen: true } }
+                );
+
+                // Notify the sender that messages were seen
+                if (clients[sender] && clients[sender].readyState === WebSocket.OPEN) {
+                    clients[sender].send(JSON.stringify({
+                        type: 'seen',
+                        data: { sender, receiver }
+                    }));
+                }
+                return;
+            }
+
             if (parsed.type === 'chat') {
                 const { sender, receiver, text, timestamp } = parsed.data;
 
-                // Save message to MongoDB
-                await saveMessage({ sender, receiver, text, timestamp });
+                // Save message to database
+                const newMessage = new Message({
+                    sender,
+                    receiver,
+                    text,
+                    timestamp: new Date(timestamp),
+                    seen: false
+                });
+                await newMessage.save();
 
                 // Forward to receiver if online
                 if (clients[receiver] && clients[receiver].readyState === WebSocket.OPEN) {
                     clients[receiver].send(JSON.stringify({
                         type: 'chat',
-                        data: parsed.data,
+                        data: {
+                            ...parsed.data,
+                            id: newMessage._id.toString()
+                        },
                     }));
                 }
 
-                // Echo back to sender
-                if (currentUserId && clients[currentUserId].readyState === WebSocket.OPEN) {
+                // Echo back to sender with the database ID
+                if (currentUserId && clients[currentUserId]?.readyState === WebSocket.OPEN) {
                     clients[currentUserId].send(JSON.stringify({
                         type: 'chat',
-                        data: parsed.data,
+                        data: {
+                            ...parsed.data,
+                            id: newMessage._id.toString()
+                        },
                     }));
                 }
             }
@@ -84,15 +131,17 @@ wss.on('connection', (ws) => {
     });
 
     ws.on('close', () => {
-        if (currentUserId) delete clients[currentUserId];
+        if (currentUserId) {
+            delete clients[currentUserId];
+        }
     });
 });
 
 app.get('/', (req, res) => {
-    res.send('<h1>WebSocket server is running</h1>');
+    res.send('<h1>WebSocket Chat Server</h1>');
 });
 
-const PORT = 3001;
+const PORT = process.env.PORT || 3001;
 server.listen(PORT, () => {
-    console.log(`Server running on ws://localhost:${PORT}/`);
+    console.log(`Server running on port ${PORT}`);
 });
