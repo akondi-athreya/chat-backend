@@ -10,6 +10,7 @@ const notificationRouter = require('./router/notificationRouter');
 const app = express();
 app.use(cors());
 app.use(express.json());
+const notificationController = require('./controller/notificationController');
 
 app.use('/api/notification', notificationRouter);
 const axios = require('axios');
@@ -23,10 +24,11 @@ mongoose.connect('mongodb+srv://websocket:websocket@hello.etr3n.mongodb.net/', {
     console.error('MongoDB connection error:', err);
 });
 
-const SendNotification = async (notificationToken, sender, text) => {
+const SendNotification = async (sender, receiver, text) => {
     try {
+        const token = await notificationController.getNotificationToken(receiver);
         const response = await axios.post('https://exp.host/--/api/v2/push/send', {
-            to: notificationToken,
+            to: JSON.parse(token).notificationToken,
             title: 'New Message',
             body: `${sender}: ${text}`,
             data: { sender, text },
@@ -185,8 +187,8 @@ wss.on('connection', (ws) => {
             }
 
             if (parsed.type === 'chat') {
-                const { sender, receiver, text, timestamp, notificationToken } = parsed.data;
-                console.log('notificationToken: ', notificationToken);
+                const { sender, receiver, text, timestamp } = parsed.data;
+
 
                 const newMessage = new Message({
                     sender,
@@ -198,7 +200,7 @@ wss.on('connection', (ws) => {
 
                 await newMessage.save();
 
-                const ans = await SendNotification(notificationToken, sender, text);
+                const ans = await SendNotification(sender, receiver, text);
                 if (ans) {
                     console.log('Notification sent successfully');
                 }
