@@ -27,6 +27,7 @@ mongoose.connect('mongodb+srv://websocket:websocket@hello.etr3n.mongodb.net/', {
 const SendNotification = async (sender, receiver, text) => {
     try {
         const token = await notificationController.getNotificationToken(receiver);
+        console.log(token.data);
         const response = await axios.post('https://exp.host/--/api/v2/push/send', {
             to: JSON.parse(token).notificationToken,
             title: 'New Message',

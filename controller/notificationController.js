@@ -26,7 +26,7 @@ const setNotificationToken = async (req, res) => {
     }
 }
 const getNotificationToken = async (req, res) => {
-    const { userId } = req.params;
+    const { userId } = req.body;
 
     try {
         const notification = await notificationSchema.findOne({ userId });
@@ -39,6 +39,10 @@ const getNotificationToken = async (req, res) => {
         console.error('Error getting notification token:', error);
         res.status(500).json({ message: 'Internal server error', error });
     }
+}
+
+export function herenotification (userId) {
+    return notificationSchema.findOne({ userId });
 }
 module.exports = {
     setNotificationToken,
