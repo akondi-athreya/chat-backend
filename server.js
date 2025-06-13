@@ -5,10 +5,13 @@ const WebSocket = require('ws');
 const cors = require('cors');
 const mongoose = require('mongoose');
 const Message = require('./model/messageModel');
+const notificationRouter = require('./router/notificationRouter');
 
 const app = express();
 app.use(cors());
 app.use(express.json());
+
+app.use('/api/notification', notificationRouter);
 
 mongoose.connect('mongodb+srv://websocket:websocket@hello.etr3n.mongodb.net/', {
     useNewUrlParser: true,
