@@ -11,9 +11,11 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 const notificationController = require('./controller/notificationController');
+const notificationSchema = require('./model/NotificationModel');
 
 app.use('/api/notification', notificationRouter);
 const axios = require('axios');
+const { send } = require('process');
 
 mongoose.connect('mongodb+srv://websocket:websocket@hello.etr3n.mongodb.net/', {
     useNewUrlParser: true,
@@ -26,11 +28,11 @@ mongoose.connect('mongodb+srv://websocket:websocket@hello.etr3n.mongodb.net/', {
 
 const SendNotification = async (sender, receiver, text) => {
     try {
-        const token = await notificationController.getNotificationToken(receiver);
-        console.log(token.data);
+        const token = await notificationSchema.findOne({ userId: receiver });
+        console.log(token.notificationToken);
         const response = await axios.post('https://exp.host/--/api/v2/push/send', {
-            to: JSON.parse(token).notificationToken,
-            title: 'New Message',
+            to: token.notificationToken,
+            title: `New message from ${sender}`,
             body: `${sender}: ${text}`,
             data: { sender, text },
             sound: 'default',

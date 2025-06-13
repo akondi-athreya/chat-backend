@@ -41,10 +41,11 @@ const getNotificationToken = async (req, res) => {
     }
 }
 
-export function herenotification (userId) {
-    return notificationSchema.findOne({ userId });
+const herenotification = async (userId) => {
+    return await notificationSchema.findOne({ userId });
 }
 module.exports = {
     setNotificationToken,
-    getNotificationToken
+    getNotificationToken,
+    herenotification
 };
