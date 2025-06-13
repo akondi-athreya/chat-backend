@@ -18,6 +18,7 @@ const setNotificationToken = async (req, res) => {
             });
         }
         await notification.save();
+        console.log('Notification token set successfully:', notification);
         res.status(200).json({ message: 'Notification token set successfully', notification });
     }
     catch (error) {
