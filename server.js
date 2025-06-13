@@ -12,6 +12,7 @@ app.use(cors());
 app.use(express.json());
 
 app.use('/api/notification', notificationRouter);
+const axios = require('axios');
 
 mongoose.connect('mongodb+srv://websocket:websocket@hello.etr3n.mongodb.net/', {
     useNewUrlParser: true,
@@ -21,6 +22,31 @@ mongoose.connect('mongodb+srv://websocket:websocket@hello.etr3n.mongodb.net/', {
 }).catch(err => {
     console.error('MongoDB connection error:', err);
 });
+
+const SendNotification = async (notificationToken, sender, text) => {
+    try {
+        const response = await axios.post('https://exp.host/--/api/v2/push/send', {
+            to: notificationToken,
+            title: 'New Message',
+            body: `${sender}: ${text}`,
+            data: { sender, text },
+            sound: 'default',
+        }, {
+            headers: {
+                'Accept': 'application/json',
+                'Content-Type': 'application/json',
+            }
+        });
+
+        if (response.status !== 200) {
+            throw new Error(`Error sending notification: ${response.statusText}`);
+        }
+
+        console.log('Notification sent:', response.data);
+    } catch (error) {
+        console.error('Error sending notification:', error);
+    }
+};
 
 // Get chat history between two users
 app.get('/history/:sender/:receiver', async (req, res) => {
@@ -159,7 +185,8 @@ wss.on('connection', (ws) => {
             }
 
             if (parsed.type === 'chat') {
-                const { sender, receiver, text, timestamp } = parsed.data;
+                const { sender, receiver, text, timestamp, notificationToken } = parsed.data;
+                console.log('notificationToken: ', notificationToken);
 
                 const newMessage = new Message({
                     sender,
@@ -170,6 +197,14 @@ wss.on('connection', (ws) => {
                 });
 
                 await newMessage.save();
+
+                const ans = await SendNotification(notificationToken, sender, text);
+                if (ans) {
+                    console.log('Notification sent successfully');
+                }
+                else {
+                    console.log('Failed to send notification');
+                }
 
                 const payload = JSON.stringify({
                     type: 'chat',
