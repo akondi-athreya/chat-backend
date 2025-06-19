@@ -28,6 +28,7 @@ const setNotificationToken = async (req, res) => {
     }
 }
 const getNotificationToken = async (req, res) => {
+    console.log(req.body);
     const { emailId } = req.body;
 
     try {
