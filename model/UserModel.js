@@ -63,6 +63,10 @@ const userSchema = new mongoose.Schema({
         type: Date,
         default: Date.now,
     },
+    notificationToken: {
+        type: String,
+        default: null,
+    },
 });
 
 // Automatically update `updatedAt` on save

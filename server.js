@@ -6,6 +6,7 @@ const cors = require('cors');
 const mongoose = require('mongoose');
 const Message = require('./model/messageModel');
 const notificationRouter = require('./router/notificationRouter');
+const User = require('./model/UserModel');
 
 const app = express();
 app.use(cors());
@@ -26,15 +27,21 @@ mongoose.connect('mongodb+srv://websocket:websocket@hello.etr3n.mongodb.net/', {
     console.error('MongoDB connection error:', err);
 });
 
-const SendNotification = async (sender, receiver, text) => {
+const SendNotification = async (senderId, receiverId, text) => {
     try {
-        const token = await notificationSchema.findOne({ userId: receiver });
-        console.log(token.notificationToken);
+        const receiver = await User.findOne({ userId: receiverId });
+        if (!receiver || !receiver.notificationToken) {
+            console.log('No notification token for receiver');
+            return;
+        }
+        const sender = await User.findOne({ userId: senderId });
+        const senderName = sender ? `${sender.firstName} ${sender.lastName}` : senderId;
+
         const response = await axios.post('https://exp.host/--/api/v2/push/send', {
-            to: token.notificationToken,
-            title: `New message from ${sender}`,
-            body: `${sender}: ${text}`,
-            data: { sender, text },
+            to: receiver.notificationToken,
+            title: `New message from ${senderName}`,
+            body: `${senderName}: ${text}`,
+            data: { senderId, text },
             sound: 'default',
         }, {
             headers: {
@@ -46,7 +53,6 @@ const SendNotification = async (sender, receiver, text) => {
         if (response.status !== 200) {
             throw new Error(`Error sending notification: ${response.statusText}`);
         }
-
         console.log('Notification sent:', response.data);
     } catch (error) {
         console.error('Error sending notification:', error);
@@ -73,8 +79,6 @@ app.get('/history/:sender/:receiver', async (req, res) => {
 app.get('/chats/:userId', async (req, res) => {
     try {
         const userId = req.params.userId;
-
-        // Get all messages where user is sender or receiver
         const messages = await Message.aggregate([
             {
                 $match: {
@@ -84,9 +88,7 @@ app.get('/chats/:userId', async (req, res) => {
                     ]
                 }
             },
-            {
-                $sort: { timestamp: -1 }
-            },
+            { $sort: { timestamp: -1 } },
             {
                 $group: {
                     _id: {
@@ -115,39 +117,30 @@ app.get('/chats/:userId', async (req, res) => {
                     lastMessageSeen: { $first: '$seen' },
                     lastMessageSender: { $first: '$sender' }
                 }
-            },
-            {
-                $project: {
-                    userId: '$_id',
-                    name: '$_id',
-                    lastMessage: 1,
-                    time: '$lastTimestamp',
-                    unseenCount: 1,
-                    seen: {
-                        $cond: [
-                            { $eq: ['$lastMessageSender', userId] },
-                            '$lastMessageSeen',
-                            true
-                        ]
-                    }
-                }
             }
         ]);
 
+        // Fetch user names for each chat
+        const userIds = messages.map(chat => chat._id);
+        const users = await User.find({ userId: { $in: userIds } });
+        const userMap = {};
+        users.forEach(u => {
+            userMap[u.userId] = `${u.firstName} ${u.lastName}`;
+        });
+
         const chats = messages.map(chat => ({
-            id: chat.userId,
-            userId: chat.userId,
-            name: chat.name,
-            avatar: 'https://i.pravatar.cc/150?u=' + chat.userId,
+            id: chat._id,
+            userId: chat._id,
+            name: userMap[chat._id] || chat._id,
+            avatar: 'https://i.pravatar.cc/150?u=' + chat._id,
             lastMessage: chat.lastMessage,
-            time: chat.time,
+            time: chat.lastTimestamp,
             unseenCount: chat.unseenCount,
-            seen: chat.seen
+            seen: chat.lastMessageSender === userId ? chat.lastMessageSeen : true
         }));
 
         res.json(chats);
     } catch (err) {
-        console.error('Error fetching chats:', err);
         res.status(500).json({ error: 'Error fetching chats' });
     }
 });
