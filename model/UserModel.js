@@ -20,15 +20,12 @@ const userSchema = new mongoose.Schema({
     gender: {
         type: String,
         enum: ['Male', 'Female', 'Other'],
-        required: true,
     },
     dateOfBirth: {
         type: Date,
-        required: true,
     },
     age: {
         type: Number,
-        required: true,
     },
     email: {
         type: String,
@@ -39,11 +36,9 @@ const userSchema = new mongoose.Schema({
     },
     phoneNumber: {
         type: String,
-        required: true,
     },
     passwordHash: {
         type: String,
-        required: true,
     },
     profilePhotoUrl: {
         type: String,
@@ -55,11 +50,9 @@ const userSchema = new mongoose.Schema({
     gpsLocation: {
         latitude: {
             type: Number,
-            required: true,
         },
         longitude: {
             type: Number,
-            required: true,
         },
     },
     createdAt: {
