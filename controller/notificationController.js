@@ -1,11 +1,11 @@
 const notificationSchema = require('../model/NotificationModel');
 
 const setNotificationToken = async (req, res) => {
-    const { userId, notificationToken } = req.body;
+    const { userId, emailId, notificationToken } = req.body;
 
     try {
         // Check if the notification token already exists for the user
-        let notification = await notificationSchema.findOne({ userId });
+        let notification = await notificationSchema.findOne({ emailId });
         if (notification) {
             // Update the existing notification token
             notification.notificationToken = notificationToken;
@@ -14,6 +14,7 @@ const setNotificationToken = async (req, res) => {
             // Create a new notification token
             notification = new notificationSchema({
                 userId,
+                emailId,
                 notificationToken
             });
         }
@@ -27,10 +28,10 @@ const setNotificationToken = async (req, res) => {
     }
 }
 const getNotificationToken = async (req, res) => {
-    const { userId } = req.body;
+    const { emailId } = req.body;
 
     try {
-        const notification = await notificationSchema.findOne({ userId });
+        const notification = await notificationSchema.findOne({ emailId });
         if (!notification) {
             return res.status(404).json({ message: 'Notification token not found' });
         }
@@ -45,6 +46,9 @@ const getNotificationToken = async (req, res) => {
 const herenotification = async (userId) => {
     return await notificationSchema.findOne({ userId });
 }
+
+
+
 module.exports = {
     setNotificationToken,
     getNotificationToken,

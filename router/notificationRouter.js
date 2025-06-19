@@ -4,6 +4,6 @@ const notificationController = require('../controller/notificationController');
 
 
 router.post('/setNotificationToken', notificationController.setNotificationToken);
-router.get('/getNotificationToken/:userId', notificationController.getNotificationToken);
+router.get('/getNotificationToken/:emailId', notificationController.getNotificationToken);
 
 module.exports = router;
