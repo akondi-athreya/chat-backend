@@ -47,8 +47,10 @@ const getNotificationToken = async (req, res) => {
         if (!notification) {
             return res.status(404).json({ message: 'Notification token not found' });
         }
-        console.log(notification);
-        return res.status(200).json({ notification });
+        // Fetch user data using userId from notification
+        const user = await userSchema.findOne({ userId: notification.userId });
+        console.log(notification, user);
+        return res.status(200).json({ notification, user });
     }
     catch (error) {
         console.error('Error getting notification token:', error);

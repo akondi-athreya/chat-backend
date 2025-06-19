@@ -16,7 +16,20 @@ exports.getChatHistory = async (req, res) => {
                 { sender: user2, receiver: user1 }
             ]
         }).sort({ timestamp: 1 });
-        res.json(messages);
+
+        // Map messages to include senderName and receiverName explicitly
+        const formattedMessages = messages.map(msg => ({
+            id: msg._id,
+            sender: msg.sender,
+            receiver: msg.receiver,
+            senderName: msg.senderName,
+            receiverName: msg.receiverName,
+            text: msg.text,
+            timestamp: msg.timestamp,
+            seen: msg.seen
+        }));
+
+        res.json(formattedMessages);
     } catch (err) {
         res.status(500).json({ error: 'Failed to fetch messages' });
     }

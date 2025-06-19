@@ -190,12 +190,13 @@ wss.on('connection', (ws) => {
             }
 
             if (parsed.type === 'chat') {
-                const { sender, receiver, text, timestamp } = parsed.data;
-
+                const { sender, receiver, text, timestamp, senderName, receiverName } = parsed.data;
 
                 const newMessage = new Message({
                     sender,
                     receiver,
+                    senderName,      // <-- Save senderName
+                    receiverName,    // <-- Save receiverName
                     text,
                     timestamp: new Date(timestamp),
                     seen: false
