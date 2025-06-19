@@ -36,7 +36,8 @@ const getNotificationToken = async (req, res) => {
         if (!notification) {
             return res.status(404).json({ message: 'Notification token not found' });
         }
-        return res.status(200).json({ notificationToken: notification.notificationToken });
+        console.log(notification);
+        return res.status(200).json({ notification });
     }
     catch (error) {
         console.error('Error getting notification token:', error);
