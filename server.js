@@ -7,6 +7,7 @@ const mongoose = require('mongoose');
 const Message = require('./model/messageModel');
 const notificationRouter = require('./router/notificationRouter');
 const User = require('./model/UserModel');
+const cron = require('node-cron');
 
 const app = express();
 app.use(cors());
@@ -238,6 +239,11 @@ wss.on('connection', (ws) => {
 
 app.get('/', (req, res) => {
     res.send('<h1>WebSocket Chat Server</h1>');
+});
+
+
+cron.schedule('*/15 * * * * *', () => {
+    console.log('hi');
 });
 
 const PORT = process.env.PORT || 3001;
