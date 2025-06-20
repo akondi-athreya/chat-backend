@@ -19,9 +19,9 @@ const setNotificationToken = async (req, res) => {
 };
 
 const getNotificationToken = async (req, res) => {
-    const { userId } = req.body;
+    const { emailId } = req.body;
     try {
-        const user = await User.findOne({ userId });
+        const user = await User.findOne({ emailId });
         if (!user || !user.notificationToken) {
             return res.status(404).json({ message: 'Notification token not found' });
         }
