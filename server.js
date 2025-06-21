@@ -225,6 +225,32 @@ wss.on('connection', (ws) => {
                     clients[sender].send(payload);
                 }
             }
+
+            if (['join-room', 'offer', 'answer', 'ice-candidate'].includes(parsed.type)) {
+                const { roomId, payload } = parsed;
+
+                // Attach user to room
+                if (parsed.type === 'join-room') {
+                    ws.roomId = roomId;
+                }
+
+                // Broadcast to all other users in the room (except sender)
+                Object.entries(clients).forEach(([userId, clientSocket]) => {
+                    if (
+                        clientSocket !== ws &&
+                        clientSocket.roomId === roomId &&
+                        clientSocket.readyState === WebSocket.OPEN
+                    ) {
+                        clientSocket.send(JSON.stringify({
+                            type: parsed.type,
+                            payload
+                        }));
+                    }
+                });
+
+                return;
+            }
+
         } catch (err) {
             console.error('Error handling message:', err);
         }
@@ -234,6 +260,7 @@ wss.on('connection', (ws) => {
         if (currentUserId) {
             delete clients[currentUserId];
         }
+        ws.roomId = null;
     });
 });
 
