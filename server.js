@@ -1,169 +1,253 @@
-// ✅ COMPLETE & UNIFIED server.js with Chat, Notifications, and Audio Messages
+// ✅ Fixed server.js
 const express = require('express');
 const http = require('http');
 const WebSocket = require('ws');
 const cors = require('cors');
 const mongoose = require('mongoose');
-const multer = require('multer');
-const path = require('path');
-const fs = require('fs');
 const Message = require('./model/messageModel');
 const notificationRouter = require('./router/notificationRouter');
 const User = require('./model/UserModel');
+const cron = require('node-cron');
 
-// --- Basic Setup ---
 const app = express();
 app.use(cors());
 app.use(express.json());
+const notificationController = require('./controller/notificationController');
+const notificationSchema = require('./model/NotificationModel');
 
-// --- Database Connection ---
+app.use('/api/notification', notificationRouter);
+const axios = require('axios');
+const { send } = require('process');
+
 mongoose.connect('mongodb+srv://websocket:websocket@hello.etr3n.mongodb.net/', {
     useNewUrlParser: true,
     useUnifiedTopology: true,
-}).then(() => console.log('✅ MongoDB connected'))
-    .catch(err => console.error('❌ MongoDB connection error:', err));
-
-// --- API Routers ---
-app.use('/api/notification', notificationRouter);
-
-
-// --- File Upload Setup (for Audio Messages) ---
-const uploadsDir = path.join(__dirname, 'uploads');
-if (!fs.existsSync(uploadsDir)) {
-    fs.mkdirSync(uploadsDir);
-}
-app.use('/uploads', express.static(uploadsDir)); // Make files publicly accessible
-
-const storage = multer.diskStorage({
-    destination: (req, file, cb) => cb(null, uploadsDir),
-    filename: (req, file, cb) => {
-        const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-        cb(null, 'audio-' + uniqueSuffix + path.extname(file.originalname) || '.m4a');
-    }
-});
-const upload = multer({ storage: storage });
-
-app.post('/upload-audio', upload.single('audio'), (req, res) => {
-    if (!req.file) {
-        return res.status(400).send('No file uploaded.');
-    }
-    const fileUrl = `${req.protocol}://${req.get('host')}/uploads/${req.file.filename}`;
-    console.log(`🔊 Audio file uploaded. Accessible at: ${fileUrl}`);
-    res.json({ url: fileUrl });
+}).then(() => {
+    console.log('MongoDB connected');
+}).catch(err => {
+    console.error('MongoDB connection error:', err);
 });
 
-
-// --- WebSocket Server Setup ---
-const server = http.createServer(app);
-const wss = new WebSocket.Server({ server });
-
-// Use a Map to store clients by their userId for easy targeting
-const clients = new Map();
-
-wss.on('connection', (ws) => {
-    console.log('🔌 New client connected. Waiting for identification...');
-
-    ws.on('message', async (message) => {
-        let parsed;
-        try {
-            parsed = JSON.parse(message);
-        } catch (e) {
-            console.log('Invalid JSON received', message);
+const SendNotification = async (senderId, receiverId, text) => {
+    try {
+        const receiver = await User.findOne({ userId: receiverId });
+        if (!receiver || !receiver.notificationToken) {
+            console.log('No notification token for receiver');
             return;
         }
+        const sender = await User.findOne({ userId: senderId });
+        const senderName = sender ? `${sender.firstName} ${sender.lastName}` : senderId;
 
-        const { type, data } = parsed;
+        const response = await axios.post('https://exp.host/--/api/v2/push/send', {
+            to: receiver.notificationToken,
+            title: `New message from ${senderName}`,
+            body: `${senderName}: ${text}`,
+            data: { senderId, text },
+            sound: 'default',
+        }, {
+            headers: {
+                'Accept': 'application/json',
+                'Content-Type': 'application/json',
+            }
+        });
 
-        // --- WebSocket Message Routing ---
-        switch (type) {
-            // Case 1: A user identifies themselves
-            case 'identification':
-                const userId = parsed.userId;
-                ws.userId = userId; // Attach userId to the WebSocket connection object
-                clients.set(userId, ws); // Store the connection by userId
-                console.log(`👤 Client identified as user: ${userId}`);
-                break;
+        if (response.status !== 200) {
+            throw new Error(`Error sending notification: ${response.statusText}`);
+        }
+        console.log('Notification sent:', response.data);
+    } catch (error) {
+        console.error('Error sending notification:', error);
+    }
+};
 
-            // Case 2: Handling real-time chat messages
-            case 'chat':
-                const { sender, receiver, text, timestamp, senderName, receiverName } = data;
+// Get chat history between two users
+app.get('/history/:sender/:receiver', async (req, res) => {
+    try {
+        const messages = await Message.find({
+            $or: [
+                { sender: req.params.sender, receiver: req.params.receiver },
+                { sender: req.params.receiver, receiver: req.params.sender }
+            ]
+        }).sort({ timestamp: 1 });
+        res.json(messages);
+    } catch (err) {
+        console.error('Error fetching history:', err);
+        res.status(500).json({ error: 'Error fetching history' });
+    }
+});
+
+// Get all chats for a user (for chat list)
+app.get('/chats/:userId', async (req, res) => {
+    try {
+        const userId = req.params.userId;
+        const messages = await Message.aggregate([
+            {
+                $match: {
+                    $or: [
+                        { sender: userId },
+                        { receiver: userId }
+                    ]
+                }
+            },
+            { $sort: { timestamp: -1 } },
+            {
+                $group: {
+                    _id: {
+                        $cond: [
+                            { $eq: ['$sender', userId] },
+                            '$receiver',
+                            '$sender'
+                        ]
+                    },
+                    lastMessage: { $first: '$text' },
+                    lastTimestamp: { $first: '$timestamp' },
+                    unseenCount: {
+                        $sum: {
+                            $cond: [
+                                {
+                                    $and: [
+                                        { $eq: ['$receiver', userId] },
+                                        { $eq: ['$seen', false] }
+                                    ]
+                                },
+                                1,
+                                0
+                            ]
+                        }
+                    },
+                    lastMessageSeen: { $first: '$seen' },
+                    lastMessageSender: { $first: '$sender' }
+                }
+            }
+        ]);
+
+        // Fetch user names for each chat
+        const userIds = messages.map(chat => chat._id);
+        const users = await User.find({ userId: { $in: userIds } });
+        const userMap = {};
+        users.forEach(u => {
+            userMap[u.userId] = `${u.firstName} ${u.lastName}`;
+        });
+
+        const chats = messages.map(chat => ({
+            id: chat._id,
+            userId: chat._id,
+            name: userMap[chat._id] || chat._id,
+            avatar: 'https://i.pravatar.cc/150?u=' + chat._id,
+            lastMessage: chat.lastMessage,
+            time: chat.lastTimestamp,
+            unseenCount: chat.unseenCount,
+            seen: chat.lastMessageSender === userId ? chat.lastMessageSeen : true
+        }));
+
+        res.json(chats);
+    } catch (err) {
+        res.status(500).json({ error: 'Error fetching chats' });
+    }
+});
+
+const server = http.createServer(app);
+const wss = new WebSocket.Server({ server });
+const clients = {};
+
+wss.on('connection', (ws) => {
+    let currentUserId = null;
+
+    ws.on('message', async (message) => {
+        try {
+            const parsed = JSON.parse(message);
+
+            if (parsed.type === 'identification') {
+                currentUserId = parsed.userId;
+                clients[currentUserId] = ws;
+                return;
+            }
+
+            if (parsed.type === 'seen') {
+                const { sender, receiver } = parsed.data;
+
+                // Mark messages as seen in database
+                await Message.updateMany(
+                    { sender, receiver, seen: false },
+                    { $set: { seen: true } }
+                );
+
+                // Send seen confirmation to sender
+                if (clients[sender]?.readyState === WebSocket.OPEN) {
+                    clients[sender].send(JSON.stringify({
+                        type: 'seen',
+                        data: { sender: receiver, receiver: sender }
+                    }));
+                }
+
+                return;
+            }
+
+            if (parsed.type === 'chat') {
+                const { sender, receiver, text, timestamp, senderName, receiverName } = parsed.data;
+
                 const newMessage = new Message({
-                    sender, receiver, senderName, receiverName, text,
-                    timestamp: new Date(timestamp), seen: false
+                    sender,
+                    receiver,
+                    senderName,      // <-- Save senderName
+                    receiverName,    // <-- Save receiverName
+                    text,
+                    timestamp: new Date(timestamp),
+                    seen: false
                 });
+
                 await newMessage.save();
+
+                const ans = await SendNotification(sender, receiver, text);
+                if (ans) {
+                    console.log('Notification sent successfully');
+                }
+                else {
+                    console.log('Failed to send notification');
+                }
 
                 const payload = JSON.stringify({
                     type: 'chat',
-                    data: { ...data, id: newMessage._id.toString(), timestamp: newMessage.timestamp.toISOString() }
+                    data: {
+                        ...parsed.data,
+                        id: newMessage._id.toString(),
+                        timestamp: newMessage.timestamp.toISOString()
+                    },
                 });
 
-                // Send to receiver if they are online
-                const receiverSocket = clients.get(receiver);
-                if (receiverSocket && receiverSocket.readyState === WebSocket.OPEN) {
-                    receiverSocket.send(payload);
+                // Send to receiver
+                if (clients[receiver]?.readyState === WebSocket.OPEN) {
+                    clients[receiver].send(payload);
                 }
-                // Send back to sender for confirmation
-                const senderSocket = clients.get(sender);
-                if (senderSocket && senderSocket.readyState === WebSocket.OPEN) {
-                    senderSocket.send(payload);
-                }
-                break;
-            
-            // Case 3: Handling the new audio message type
-            case 'audio-message':
-                const { sender: audioSender, receiver: audioReceiver, url } = data;
-                console.log(`📢 Relaying audio message from ${audioSender} to ${audioReceiver}`);
 
-                const audioPayload = JSON.stringify({ type: 'audio-message', data });
-                
-                // Send to receiver if they are online
-                const audioReceiverSocket = clients.get(audioReceiver);
-                if (audioReceiverSocket && audioReceiverSocket.readyState === WebSocket.OPEN) {
-                    audioReceiverSocket.send(audioPayload);
+                // Send back to sender (for confirmation)
+                if (clients[sender]?.readyState === WebSocket.OPEN) {
+                    clients[sender].send(payload);
                 }
-                break;
+            }
 
-            // Case 4: Handling seen status updates
-            case 'seen':
-                const { sender: seenSender, receiver: seenReceiver } = data;
-                await Message.updateMany(
-                    { sender: seenSender, receiver: seenReceiver, seen: false },
-                    { $set: { seen: true } }
-                );
-                
-                // Notify the original sender that their messages have been seen
-                const originalSenderSocket = clients.get(seenSender);
-                if (originalSenderSocket && originalSenderSocket.readyState === WebSocket.OPEN) {
-                    originalSenderSocket.send(JSON.stringify({
-                        type: 'seen',
-                        data: { sender: seenReceiver, receiver: seenSender }
-                    }));
-                }
-                break;
+        } catch (err) {
+            console.error('Error handling message:', err);
         }
     });
 
     ws.on('close', () => {
-        // When a client disconnects, remove them from the Map
-        if (ws.userId) {
-            clients.delete(ws.userId);
-            console.log(`🔌 Client disconnected: ${ws.userId}`);
-        } else {
-            console.log('🔌 Unidentified client disconnected');
+        if (currentUserId) {
+            delete clients[currentUserId];
         }
-    });
-
-    ws.on('error', (error) => {
-        console.error('WebSocket error:', error);
     });
 });
 
 app.get('/', (req, res) => {
-    res.send('<h1>✅ Unified Chat and Audio Server is Running</h1>');
+    res.send('<h1>WebSocket Chat Server</h1>');
+});
+
+
+cron.schedule('*/15 * * * * *', () => {
+    console.log('hi');
 });
 
 const PORT = process.env.PORT || 3001;
 server.listen(PORT, () => {
-    console.log(`🚀 Server running on port ${PORT}`);
+    console.log(`Server running on port ${PORT}`);
 });
