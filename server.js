@@ -230,26 +230,27 @@ wss.on('connection', (ws) => {
             if (['join-room', 'offer', 'answer', 'ice-candidate'].includes(parsed.type)) {
                 const { roomId, payload } = parsed;
 
-                // Attach user to room
                 if (parsed.type === 'join-room') {
                     ws.roomId = roomId;
                     console.log(`👤 Client joined room: ${roomId}`);
+                    return; // ✅ Don't relay this
                 }
 
-                // Relay to all other users in the room (except sender)
-                clients.forEach((clientSocket) => {
-                    if (
-                        clientSocket !== ws &&
-                        clientSocket.roomId === roomId &&
-                        clientSocket.readyState === WebSocket.OPEN
-                    ) {
-                        console.log(`🔁 Relaying ${parsed.type} to peer in room ${roomId}`);
-                        clientSocket.send(JSON.stringify({
-                            type: parsed.type,
-                            payload
-                        }));
-                    }
-                });
+                // Relay only signaling types
+                ['offer', 'answer', 'ice-candidate'].includes(parsed.type) &&
+                    clients.forEach((clientSocket) => {
+                        if (
+                            clientSocket !== ws &&
+                            clientSocket.roomId === roomId &&
+                            clientSocket.readyState === WebSocket.OPEN
+                        ) {
+                            console.log(`🔁 Relaying ${parsed.type} to peer in room ${roomId}`);
+                            clientSocket.send(JSON.stringify({
+                                type: parsed.type,
+                                payload
+                            }));
+                        }
+                    });
 
                 return;
             }
