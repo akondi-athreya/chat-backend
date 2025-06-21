@@ -1,4 +1,4 @@
-// ✅ Updated server.js with WebRTC signaling fixes
+// ✅ Final and Complete server.js
 const express = require('express');
 const http = require('http');
 const WebSocket = require('ws');
@@ -14,116 +14,187 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+// --- Database Connection ---
 mongoose.connect('mongodb+srv://websocket:websocket@hello.etr3n.mongodb.net/', {
     useNewUrlParser: true,
     useUnifiedTopology: true,
-}).then(() => console.log('MongoDB connected'))
-    .catch(err => console.error('MongoDB connection error:', err));
+}).then(() => console.log('✅ MongoDB connected'))
+    .catch(err => console.error('❌ MongoDB connection error:', err));
 
 app.use('/api/notification', notificationRouter);
 
+// --- HTTP Server and WebSocket Server Setup ---
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
-const clients = new Set();
+
+// Use a Map to store rooms and their clients for efficient management
+const rooms = new Map();
 
 wss.on('connection', (ws) => {
-    let currentUserId = null;
-    clients.add(ws);
+    console.log('🔌 New client connected');
+    // We assign these properties when the client sends a message
+    ws.userId = null;
+    ws.roomId = null;
 
     ws.on('message', async (message) => {
+        let parsed;
         try {
-            const parsed = JSON.parse(message);
+            parsed = JSON.parse(message);
+        } catch (e) {
+            console.error('Error parsing JSON message:', e);
+            return;
+        }
 
-            if (parsed.type === 'identification') {
-                currentUserId = parsed.userId;
-                return;
-            }
+        const { type, roomId, payload, data } = parsed;
 
-            if (parsed.type === 'seen') {
-                const { sender, receiver } = parsed.data;
-                await Message.updateMany(
-                    { sender, receiver, seen: false },
-                    { $set: { seen: true } }
-                );
-                clients.forEach((clientSocket) => {
-                    if (clientSocket.userId === sender && clientSocket.readyState === WebSocket.OPEN) {
-                        clientSocket.send(JSON.stringify({
-                            type: 'seen',
-                            data: { sender: receiver, receiver: sender }
-                        }));
-                    }
-                });
-                return;
-            }
+        // --- SECTION 1: Handling Chat, Seen Status, and User Identification ---
+        // This logic is preserved from your original file.
 
-            if (parsed.type === 'chat') {
-                const { sender, receiver, text, timestamp, senderName, receiverName } = parsed.data;
-                const newMessage = new Message({
-                    sender, receiver, senderName, receiverName, text,
-                    timestamp: new Date(timestamp), seen: false
-                });
-                await newMessage.save();
+        if (type === 'identification') {
+            ws.userId = parsed.userId; // Assign userId to the websocket connection
+            console.log(`👤 Client identified as user: ${ws.userId}`);
+            return;
+        }
 
-                const payload = JSON.stringify({
-                    type: 'chat',
-                    data: {
-                        ...parsed.data,
-                        id: newMessage._id.toString(),
-                        timestamp: newMessage.timestamp.toISOString()
-                    }
-                });
+        if (type === 'seen') {
+            const { sender, receiver } = data;
+            await Message.updateMany(
+                { sender, receiver, seen: false },
+                { $set: { seen: true } }
+            );
+            // Find the sender's websocket to notify them
+            wss.clients.forEach((clientSocket) => {
+                if (clientSocket.userId === sender && clientSocket.readyState === WebSocket.OPEN) {
+                    clientSocket.send(JSON.stringify({
+                        type: 'seen',
+                        data: { sender: receiver, receiver: sender }
+                    }));
+                }
+            });
+            return;
+        }
 
-                clients.forEach((clientSocket) => {
-                    if (clientSocket.readyState === WebSocket.OPEN) {
-                        if (clientSocket.userId === receiver || clientSocket.userId === sender) {
-                            clientSocket.send(payload);
-                        }
-                    }
-                });
-                return;
-            }
+        if (type === 'chat') {
+            const { sender, receiver, text, timestamp, senderName, receiverName } = data;
+            const newMessage = new Message({
+                sender, receiver, senderName, receiverName, text,
+                timestamp: new Date(timestamp), seen: false
+            });
+            await newMessage.save();
 
-            if (['join-room', 'offer', 'answer', 'ice-candidate'].includes(parsed.type)) {
-                const { roomId, payload } = parsed;
+            const chatPayload = JSON.stringify({
+                type: 'chat',
+                data: { ...data, id: newMessage._id.toString(), timestamp: newMessage.timestamp.toISOString() }
+            });
 
-                if (parsed.type === 'join-room') {
-                    ws.roomId = roomId;
-                    console.log(`👤 Client joined room: ${roomId}`);
-                    return; // Don't broadcast join-room
+            // Send message to both sender and receiver
+            wss.clients.forEach((clientSocket) => {
+                if (clientSocket.readyState === WebSocket.OPEN && (clientSocket.userId === receiver || clientSocket.userId === sender)) {
+                    clientSocket.send(chatPayload);
+                }
+            });
+            return;
+        }
+
+
+        // --- SECTION 2: Robust WebRTC Signaling Logic ---
+
+        switch (type) {
+            case 'join-room':
+                if (!roomId) return;
+                ws.roomId = roomId;
+
+                // Get or create the room
+                let room = rooms.get(roomId);
+                if (!room) {
+                    room = new Set();
+                    rooms.set(roomId, room);
                 }
 
-                clients.forEach((clientSocket) => {
-                    if (
-                        clientSocket !== ws &&
-                        clientSocket.roomId === roomId &&
-                        clientSocket.readyState === WebSocket.OPEN
-                    ) {
-                        console.log(`🔁 Relaying ${parsed.type} to peer in room ${roomId}`);
-                        clientSocket.send(JSON.stringify({ type: parsed.type, payload }));
-                    }
-                });
-                return;
-            }
-        } catch (err) {
-            console.error('Error handling message:', err);
+                // Add the new client to the room
+                room.add(ws);
+                console.log(`[Room: ${roomId}] Client joined. Room size is now ${room.size}`);
+
+                // If another peer is already in the room, notify that peer.
+                // This is the trigger for the first peer to start the connection.
+                if (room.size > 1) {
+                     room.forEach(client => {
+                        if (client !== ws && client.readyState === WebSocket.OPEN) {
+                            console.log(`[Room: ${roomId}] Notifying peer that a new client has joined.`);
+                            client.send(JSON.stringify({ type: 'peer-joined' }));
+                        }
+                    });
+                }
+                break;
+
+            case 'offer':
+            case 'answer':
+            case 'ice-candidate':
+                // Relay WebRTC messages to the other peer in the same room.
+                const targetRoom = rooms.get(roomId);
+                if (targetRoom) {
+                    targetRoom.forEach(client => {
+                        if (client !== ws && client.readyState === WebSocket.OPEN) {
+                            console.log(`[Room: ${roomId}] Relaying '${type}' to peer.`);
+                            client.send(JSON.stringify({ type, payload }));
+                        }
+                    });
+                }
+                break;
         }
     });
 
     ws.on('close', () => {
-        clients.delete(ws);
-        ws.roomId = null;
+        console.log(`🔌 Client disconnected (User: ${ws.userId}, Room: ${ws.roomId})`);
+        const { roomId } = ws;
+
+        if (roomId) {
+            const room = rooms.get(roomId);
+            if (room) {
+                room.delete(ws); // Remove the client from the room's Set
+
+                console.log(`[Room: ${roomId}] Client left. Room size is now ${room.size}`);
+
+                // Notify the remaining peer that the other has left the call
+                room.forEach(client => {
+                    if (client.readyState === WebSocket.OPEN) {
+                        console.log(`[Room: ${roomId}] Notifying remaining peer that client has left.`);
+                        client.send(JSON.stringify({ type: 'peer-left' }));
+                    }
+                });
+
+                // If the room is now empty, remove it from the Map to free up memory
+                if (room.size === 0) {
+                    rooms.delete(roomId);
+                    console.log(`[Room: ${roomId}] Room is empty and has been removed.`);
+                }
+            }
+        }
+    });
+
+    ws.on('error', (error) => {
+        console.error('WebSocket error:', error);
     });
 });
 
 app.get('/', (req, res) => {
-    res.send('<h1>WebSocket Chat Server</h1>');
+    res.send('<h1>Realtime Voice & Chat Server is Running</h1>');
 });
 
+// This is for keeping the server alive on some platforms, it's fine
 cron.schedule('*/15 * * * * *', () => {
-    console.log('hi');
+    async function keepAlive() {
+        try {
+            const res = await fetch("https://chat-backend-xsri.onrender.com");
+        }
+        catch (error) {
+            console.error('Error during keep-alive:', error);
+        }
+    }
+    keepAlive();
 });
 
 const PORT = process.env.PORT || 3001;
 server.listen(PORT, () => {
-    console.log(`Server running on port ${PORT}`);
+    console.log(`🚀 Server running on port ${PORT}`);
 });
