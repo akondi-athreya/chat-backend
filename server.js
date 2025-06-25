@@ -14,8 +14,10 @@ app.use(cors());
 app.use(express.json());
 const notificationController = require('./controller/notificationController');
 const notificationSchema = require('./model/NotificationModel');
+const userRouter = require('./router/userRouter');
 
 app.use('/api/notification', notificationRouter);
+app.use('/api/user', userRouter);
 const axios = require('axios');
 const { send } = require('process');
 
