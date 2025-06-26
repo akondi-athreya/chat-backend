@@ -8,6 +8,9 @@ const Message = require('./model/messageModel');
 const notificationRouter = require('./router/notificationRouter');
 const User = require('./model/UserModel');
 const cron = require('node-cron');
+const multer = require('multer'); // Import multer
+const path = require('path'); // Import path
+const fs = require('fs'); // Import fs
 
 const app = express();
 app.use(cors());
@@ -20,6 +23,38 @@ app.use('/api/notification', notificationRouter);
 app.use('/api/user', userRouter);
 const axios = require('axios');
 const { send } = require('process');
+
+// --- Multer Configuration for Audio Uploads ---
+const audioUploadDir = path.join(__dirname, 'uploads/audio');
+if (!fs.existsSync(audioUploadDir)) {
+    fs.mkdirSync(audioUploadDir, { recursive: true });
+}
+
+const audioStorage = multer.diskStorage({
+    destination: (req, file, cb) => {
+        cb(null, audioUploadDir);
+    },
+    filename: (req, file, cb) => {
+        cb(null, `${Date.now()}-${file.originalname}`);
+    },
+});
+
+const uploadAudio = multer({ storage: audioStorage });
+
+// Serve uploaded files statically
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+
+// New endpoint to handle audio uploads
+app.post('/upload/audio', uploadAudio.single('audio'), (req, res) => {
+    if (!req.file) {
+        return res.status(400).send('No file uploaded.');
+    }
+    // Make sure to use your server's public URL
+    const fileUrl = `https://chat-backend-xsri.onrender.com/uploads/audio/${req.file.filename}`;
+    res.status(200).json({ url: fileUrl });
+});
+// --------------------------------------------------
+
 
 mongoose.connect('mongodb+srv://websocket:websocket@hello.etr3n.mongodb.net/', {
     useNewUrlParser: true,
@@ -39,11 +74,13 @@ const SendNotification = async (senderId, receiverId, text) => {
         }
         const sender = await User.findOne({ userId: senderId });
         const senderName = sender ? `${sender.firstName} ${sender.lastName}` : senderId;
+        const notificationBody = text ? `${senderName}: ${text}` : 'Sent you a voice message';
+
 
         const response = await axios.post('https://exp.host/--/api/v2/push/send', {
             to: receiver.notificationToken,
             title: `New message from ${senderName}`,
-            body: `${senderName}: ${text}`,
+            body: notificationBody,
             data: { senderId, text },
             sound: 'default',
         }, {
@@ -101,7 +138,8 @@ app.get('/chats/:userId', async (req, res) => {
                             '$sender'
                         ]
                     },
-                    lastMessage: { $first: '$text' },
+                    // Updated to handle both text and audio messages
+                    lastMessage: { $first: { $cond: { if: { $eq: ['$messageType', 'audio'] }, then: 'Voice Message', else: '$text' } } },
                     lastTimestamp: { $first: '$timestamp' },
                     unseenCount: {
                         $sum: {
@@ -167,62 +205,64 @@ wss.on('connection', (ws) => {
 
             if (parsed.type === 'seen') {
                 const { sender, receiver } = parsed.data;
-
-                // Mark messages as seen in database
                 await Message.updateMany(
                     { sender, receiver, seen: false },
                     { $set: { seen: true } }
                 );
-
-                // Send seen confirmation to sender
                 if (clients[sender]?.readyState === WebSocket.OPEN) {
                     clients[sender].send(JSON.stringify({
                         type: 'seen',
                         data: { sender: receiver, receiver: sender }
                     }));
                 }
-
                 return;
             }
 
             if (parsed.type === 'chat') {
-                const { sender, receiver, text, timestamp, senderName, receiverName } = parsed.data;
+                // Destructure new fields for audio messages
+                const {
+                    sender, receiver, text, timestamp, senderName, receiverName,
+                    messageType, fileUrl, duration
+                } = parsed.data;
 
                 const newMessage = new Message({
                     sender,
                     receiver,
-                    senderName,      // <-- Save senderName
-                    receiverName,    // <-- Save receiverName
-                    text,
+                    senderName,
+                    receiverName,
+                    text: text || null, // text can be null for audio messages
                     timestamp: new Date(timestamp),
-                    seen: false
+                    seen: false,
+                    // Save new fields
+                    messageType: messageType || 'text',
+                    fileUrl: fileUrl || null,
+                    duration: duration || 0
                 });
 
                 await newMessage.save();
 
+                // Send notification for both text and audio
                 const ans = await SendNotification(sender, receiver, text);
-                if (ans) {
-                    console.log('Notification sent successfully');
-                }
-                else {
-                    console.log('Failed to send notification');
-                }
+                if (ans) console.log('Notification sent successfully');
+                else console.log('Failed to send notification');
 
                 const payload = JSON.stringify({
                     type: 'chat',
                     data: {
                         ...parsed.data,
-                        id: newMessage._id.toString(),
-                        timestamp: newMessage.timestamp.toISOString()
+                        id: newMessage._id.toString(), // use db id
+                        timestamp: newMessage.timestamp.toISOString(),
+                        // ensure new fields are in the payload
+                        messageType: newMessage.messageType,
+                        fileUrl: newMessage.fileUrl,
+                        duration: newMessage.duration,
                     },
                 });
 
-                // Send to receiver
+                // Send to receiver and sender
                 if (clients[receiver]?.readyState === WebSocket.OPEN) {
                     clients[receiver].send(payload);
                 }
-
-                // Send back to sender (for confirmation)
                 if (clients[sender]?.readyState === WebSocket.OPEN) {
                     clients[sender].send(payload);
                 }
@@ -244,10 +284,13 @@ app.get('/', (req, res) => {
     res.send('<h1>WebSocket Chat Server</h1>');
 });
 
-
-cron.schedule('*/15 * * * * *', () => {
-    console.log('hi');
-});
+setTimeout(async () => {
+    try {
+        const res = await axios.get('https://chat-backend-xsri.onrender.com/');
+    } catch (error) {
+        console.error('Error fetching data:', error);
+    }
+}, 30000);
 
 const PORT = process.env.PORT || 3001;
 server.listen(PORT, () => {

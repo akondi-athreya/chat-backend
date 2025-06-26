@@ -1,34 +1,48 @@
+// ✅ Fixed messageModel.js
 const mongoose = require('mongoose');
 
 const messageSchema = new mongoose.Schema({
-    sender: { 
+    sender: {
         type: String,
         required: true
     },
-    receiver: { 
+    receiver: {
         type: String,
         required: true
     },
-    senderName: { 
+    senderName: {
         type: String,
         required: true
     },
-    receiverName: { 
+    receiverName: {
         type: String,
         required: true
     },
-    text: { 
+    text: {
         type: String,
-        required: true
+        required: false // No longer required, for audio messages
     },
-    timestamp: { 
+    timestamp: {
         type: Date,
         default: Date.now
     },
-    seen: { 
+    seen: {
         type: Boolean,
         default: false
-    } 
+    },
+    // --- New Fields for Voice Messages ---
+    messageType: {
+        type: String,
+        default: 'text', // 'text' or 'audio'
+    },
+    fileUrl: {
+        type: String,
+        default: null,
+    },
+    duration: { // To store the duration of the audio
+        type: Number,
+        default: 0
+    }
 });
 
 module.exports = mongoose.model('Message', messageSchema);
