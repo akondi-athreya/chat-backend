@@ -23,7 +23,6 @@ const userSchema = new mongoose.Schema({
     },
     bloodGroup: {
         type: String,
-        required: true,
     },
     dateOfBirth: {
         type: Date,
