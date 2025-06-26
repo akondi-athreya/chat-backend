@@ -1,15 +1,16 @@
 const User = require('../model/UserModel');
 
 const setNotificationToken = async (req, res) => {
-    const { userId, notificationToken, data } = req.body;
+    const { userId, notificationToken, data, bloodGroup } = req.body;
     try {
         let user = await User.findOne({ userId });
         if (user) {
             user.notificationToken = notificationToken;
+            user.bloodGroup = bloodGroup;
             user.updatedAt = Date.now();
             await user.save();
         } else {
-            user = new User({ ...data, userId, notificationToken });
+            user = new User({ ...data, userId, notificationToken, bloodGroup });
             await user.save();
         }
         res.status(200).json({ message: 'Notification token set successfully', user });
