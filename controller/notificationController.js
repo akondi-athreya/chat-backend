@@ -59,12 +59,12 @@ const BloodRequestNotification = async (req, res) => {
             },
             { $project: { _id: 0, notificationTokens: 1 } }
         ])
-        console.log(receivers);
+        console.log(userData);
         receivers[0]?.notificationTokens?.map(async (item, index) => {
             const response = await axios.post('https://exp.host/--/api/v2/push/send', {
                 to: item,
                 title: `New Blood Request For ${bloodGroup}`,
-                body: `${bloodGroup} blood is required at ${location}. Please contact ${userData.senderName} at ${userData.senderPhoneNumber} for more details.`,
+                body: `${bloodGroup} blood is required at ${location}. Please contact ${userData.firstName + " " +userData.lastName} at ${userData.phoneNumber} for more details.`,
                 sound: 'default',
                 badge: 1,
             }, {
