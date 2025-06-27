@@ -58,6 +58,7 @@ const BloodRequestNotification = async (req, res) => {
             },
             { $project: { _id: 0, notificationTokens: 1 } }
         ])
+        console.log(receivers);
         receivers[0]?.notificationTokens?.map(async (item, index) => {
             const response = await axios.post('https://exp.host/--/api/v2/push/send', {
                 to: item,
