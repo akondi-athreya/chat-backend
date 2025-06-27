@@ -51,6 +51,7 @@ app.post('/upload/audio', uploadAudio.single('audio'), (req, res) => {
     }
     // Make sure to use your server's public URL
     const fileUrl = `https://chat-backend-xsri.onrender.com/uploads/audio/${req.file.filename}`;
+    
     res.status(200).json({ url: fileUrl });
 });
 // --------------------------------------------------

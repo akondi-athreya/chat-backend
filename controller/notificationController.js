@@ -33,7 +33,54 @@ const getNotificationToken = async (req, res) => {
     }
 };
 
+
+const BloodRequestNotification = async (req, res) => {
+    try {
+        const { senderId, bloodGroup, location } = req.body;
+
+        const userData = await User.findOne({ userId: senderId });
+
+        const receivers = await User.aggregate([
+            {
+                $match: {
+                    userId: {
+                        $ne: senderId
+                    }
+                }
+            },
+            {
+                $group: {
+                    _id: null,
+                    notificationTokens: {
+                        $push: "$notificationToken"
+                    }
+                }
+            },
+            { $project: { _id: 0, notificationTokens: 1 } }
+        ])
+        receivers[0]?.notificationTokens?.map(async (item, index) => {
+            const response = await axios.post('https://exp.host/--/api/v2/push/send', {
+                to: item,
+                title: `New Blood Request For ${bloodGroup}`,
+                body: `${bloodGroup} blood is required at ${location}. Please contact ${userData.senderName} at ${userData.senderPhoneNumber} for more details.`,
+                sound: 'default',
+                badge: 1,
+            }, {
+                headers: {
+                    'Accept': 'application/json',
+                    'Content-Type': 'application/json',
+                }
+            });
+        })
+        return res.status(200).json({  message: 'Notification sent successfully'});
+    } catch (error) {
+        console.error(error);
+        return res.status(500).json({ message: 'Internal server error', error });
+    }
+}
+
 module.exports = {
     setNotificationToken,
     getNotificationToken,
+    BloodRequestNotification
 };
