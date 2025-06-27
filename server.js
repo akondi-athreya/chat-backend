@@ -44,14 +44,22 @@ const uploadAudio = multer({ storage: audioStorage });
 // Serve uploaded files statically
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
-// New endpoint to handle audio uploads
+// ✅ FIX: Added detailed logging and a better error response to help debug storage issues.
+// Check your Render server logs after trying to upload a voice message.
 app.post('/upload/audio', uploadAudio.single('audio'), (req, res) => {
     if (!req.file) {
-        return res.status(400).send('No file uploaded.');
+        console.error('[Upload Error] Audio upload endpoint was called, but no file was received in the request.');
+        return res.status(400).json({ message: 'No file was uploaded. Please include a file in the "audio" field.' });
     }
+
+    console.log(`[Upload Success] File received: ${req.file.originalname}, Size: ${req.file.size} bytes.`);
+    console.log(`[Upload Success] File stored at: ${req.file.path}`);
+
     // Make sure to use your server's public URL
     const fileUrl = `https://chat-backend-xsri.onrender.com/uploads/audio/${req.file.filename}`;
-    
+
+    console.log(`[Upload Success] Generated public URL: ${fileUrl}`);
+
     res.status(200).json({ url: fileUrl });
 });
 // --------------------------------------------------
@@ -244,8 +252,6 @@ wss.on('connection', (ws) => {
                 if (ans) console.log('Notification sent successfully');
                 else console.log('Failed to send notification');
 
-                // ✅ FIX: The payload now includes the original client 'id' as 'clientId'.
-                // This allows the client to find and replace its temporary message.
                 const payload = JSON.stringify({
                     type: 'chat',
                     data: {
