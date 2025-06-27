@@ -219,7 +219,6 @@ wss.on('connection', (ws) => {
             }
 
             if (parsed.type === 'chat') {
-                // Destructure new fields for audio messages
                 const {
                     sender, receiver, text, timestamp, senderName, receiverName,
                     messageType, fileUrl, duration
@@ -230,10 +229,9 @@ wss.on('connection', (ws) => {
                     receiver,
                     senderName,
                     receiverName,
-                    text: text || null, // text can be null for audio messages
+                    text: text || null,
                     timestamp: new Date(timestamp),
                     seen: false,
-                    // Save new fields
                     messageType: messageType || 'text',
                     fileUrl: fileUrl || null,
                     duration: duration || 0
@@ -241,25 +239,25 @@ wss.on('connection', (ws) => {
 
                 await newMessage.save();
 
-                // Send notification for both text and audio
                 const ans = await SendNotification(sender, receiver, text);
                 if (ans) console.log('Notification sent successfully');
                 else console.log('Failed to send notification');
 
+                // ✅ FIX: The payload now includes the original client 'id' as 'clientId'.
+                // This allows the client to find and replace its temporary message.
                 const payload = JSON.stringify({
                     type: 'chat',
                     data: {
                         ...parsed.data,
-                        id: newMessage._id.toString(), // use db id
+                        clientId: parsed.data.id, // Preserve the original client-generated ID
+                        id: newMessage._id.toString(), // The new, permanent database ID
                         timestamp: newMessage.timestamp.toISOString(),
-                        // ensure new fields are in the payload
                         messageType: newMessage.messageType,
                         fileUrl: newMessage.fileUrl,
                         duration: newMessage.duration,
                     },
                 });
 
-                // Send to receiver and sender
                 if (clients[receiver]?.readyState === WebSocket.OPEN) {
                     clients[receiver].send(payload);
                 }
